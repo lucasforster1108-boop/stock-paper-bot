@@ -1,0 +1,24 @@
+{
+  "benchmark": "SPY",
+  "capital": 1000.0,
+  "max_hold_days": 20,
+  "max_positions": 4,
+  "slippage": 0.0015,
+  "slot_usd": 330.0,
+  "stop_loss": -0.07,
+  "take_profit": 0.18,
+  "telegram": {
+    "bot_token_file": "",
+    "chat_id": ""
+  },
+  "tradable": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "GOOGL",
+    "META",
+    "TSLA",
+    "AVGO"
+  ]
+}
