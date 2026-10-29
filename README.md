@@ -1,145 +1,114 @@
 # stock-paper-bot
 
-A US-stock **paper-trading** bot for strategy validation: **pure Python standard library, single file, virtual money only — no broker account, no orders, no real money.** Market data comes from Yahoo Finance's public chart API.
+A paper-trading bot for a US-stock trend+momentum strategy. I wrote it because the backtest looked great and I didn't trust it — this runs the same rules forward, on virtual money, one real trading day at a time. No broker account, no orders, no real money. Yahoo Finance's public chart API for data, stdlib only, one file.
 
-The built-in strategy is trend + momentum with hard exits. Signals are computed at the close of day T and filled at the open of day T+1, with 0.15 % slippage charged per side.
+## The rules
 
-## Rules
+Signals are computed at the close of day T and filled at the open of day T+1, with 0.15 % slippage charged per side.
 
-**Buy** (ranked by 20-day relative strength vs SPY, strongest first), when a stock is not held:
+Buy candidates (not currently held), ranked by 20-day relative strength vs SPY, strongest first:
+
 - close > 20-day SMA > 50-day SMA
 - RSI(14) < 70
 - 20-day return beats SPY's 20-day return
 
-**Sell** a held stock when any exit triggers:
-- stop loss −7 % · take profit +18 %
-- close falls below the 20-day SMA
+Sell a held stock when any of these triggers:
+
+- −7 % stop loss or +18 % take profit
+- close drops below the 20-day SMA
 - held for 20 trading days
 
-**Portfolio**: virtual $1,000, at most 4 positions, ~$330 per slot (capped at 34 % of NAV per fill). A built-in backtest mode replays the same rules over the last ~253 trading days and reports return vs SPY, max drawdown and win rate.
+Portfolio: virtual $1,000, at most 4 positions, about $330 a slot (and no single fill over 34 % of NAV).
 
-Daily runs report NAV, positions, fills and the next day's plan; the report is printed, appended to `ledger.jsonl`, and — if you configure it — pushed to a Telegram chat. It only sends when something happened, on Fridays, or on the first run.
+## About that backtest
 
-## Deployment
+`python3 paper.py backtest` replays the rules over roughly the last 253 trading days. On my universe it printed +68 % vs SPY +14 %, max drawdown −20 %, win rate 44 % over 86 closed trades.
 
-1. **Configure (optional)**: `cp config.example.json config.json` and adjust the universe/parameters. Without `config.json` the built-in defaults apply. To receive Telegram reports, put your bot token in its own file and set `telegram.bot_token_file` + `telegram.chat_id` in `config.json`; leave them empty and the bot simply prints.
-2. **Run**:
+Don't take that number seriously. The stock universe was picked with hindsight, and the sample year happened to be a semiconductor bull run — of course a momentum strategy looks brilliant on it. That's the whole point of this bot: the backtest is a hypothesis, the forward paper record is the test. I gave it a 4-week window before drawing any conclusion, and the real-money conversation only starts after that, if at all.
 
-   ```bash
-   python3 paper.py run        # one daily step (this is what cron calls)
-   python3 paper.py backtest   # replay the rules on ~1 year of history
-   python3 paper.py status     # dump current state
-   ```
+## Running it
 
-   Schedule the daily step after the US close on trading days, e.g. with cron:
+```bash
+python3 paper.py run        # one daily step (this is what cron calls)
+python3 paper.py backtest   # replay on ~1 year of history
+python3 paper.py status     # dump current state
+```
 
-   ```cron
-   0 7 * * 2-6  cd /opt/stock-paper-bot && /usr/bin/python3 paper.py run >> run.log 2>&1
-   ```
+I run it from cron after the US close, Tuesday to Saturday in my timezone:
 
-   (07:00 in a UTC+8 timezone ≈ after the US close, Tuesday–Saturday.) The runner retries for a while if Yahoo hasn't published the new bar yet, and skips quietly when there is no new trading day.
+```cron
+0 7 * * 2-6  cd /opt/stock-paper-bot && /usr/bin/python3 paper.py run >> run.log 2>&1
+```
 
-State is kept in `state.json` and every fill in `ledger.jsonl`, both next to the script.
+If Yahoo hasn't published the new bar yet, the runner retries for a while instead of crashing; on non-trading days it just skips. Reports print NAV, positions, fills and tomorrow's plan, and are appended to `ledger.jsonl`. It only pushes to Telegram when something actually happened, on Fridays, or on the first run (set `telegram.bot_token_file` + `telegram.chat_id` in config; leave empty and it just prints). State lives in `state.json` next to the script.
 
-## Configuration (config.json)
+## Config
 
-| Key | Description |
+`cp config.example.json config.json` — without one, built-in defaults apply.
+
+| Key | What it does |
 | --- | --- |
-| `tradable` | The stock universe to scan. |
-| `benchmark` | Benchmark symbol for relative strength and reporting (default SPY). |
-| `capital` | Virtual starting capital (USD). |
-| `max_positions` | Maximum simultaneous positions. |
-| `slot_usd` | Target notional per position slot. |
-| `slippage` | Slippage charged per side (default 0.15 %). |
-| `stop_loss` / `take_profit` | Hard exit thresholds (defaults −7 % / +18 %). |
-| `max_hold_days` | Maximum holding period in trading days. |
-| `telegram.bot_token_file` | Path to a file containing your Telegram bot token (token never goes into config or code). Empty = no push. |
-| `telegram.chat_id` | Chat ID to push daily reports to. Empty = no push. |
+| `tradable` | The stock universe to scan (the example file has a generic mega-cap list; put your own in) |
+| `benchmark` | Relative-strength benchmark (default SPY) |
+| `capital` | Virtual starting capital |
+| `max_positions` / `slot_usd` | Portfolio shape |
+| `slippage` | Per-side slippage (default 0.15 %) |
+| `stop_loss` / `take_profit` | Hard exits (−7 % / +18 %) |
+| `max_hold_days` | Max holding period in trading days |
+| `telegram.*` | Optional report push; token stays in its own file |
 
-## Notes & disclaimer
+Yahoo's chart endpoint is unofficial and can change or rate-limit whenever it feels like it. Report texts are Chinese literals. This is a validation tool, not financial advice — see the backtest paragraph above before quoting any number from it.
 
-- This is a **validation tool**, not financial advice: paper results — especially backtests on a hand-picked universe over a favourable period — overstate what live trading would do. Survivorship and selection bias are real; treat any good-looking number as a hypothesis, not evidence.
-- Yahoo's chart API is an unofficial public endpoint; it can change or rate-limit without notice.
-- Report texts are in Chinese; they are plain string literals and can be replaced freely.
-
-## Custom development
-
-Universe, rules and thresholds are all adjustable. If you need a variant (different strategy, data source, or reporting), a customized or hosted version can be arranged — contact the author.
-
-## License
-
-MIT, see [LICENSE](LICENSE).
+MIT license, see LICENSE.
 
 ---
 
 ## 中文版
 
-一个美股**纸面交易（模拟盘）**机器人，用来验证策略：**纯 Python 标准库、单文件、只有虚拟资金——没有券商账户、不下单、不动真钱。**行情取自 Yahoo Finance 的公开 chart 接口。
-
-内置策略是趋势 + 动量，配硬性退出规则。第 T 日收盘出信号、第 T+1 日开盘成交，每边收 0.15 % 滑点。
+美股趋势+动量策略的纸面机器人。写它的原因就是回测太好看了、我不信——所以让同一套规则用虚拟资金、按真实交易日一天一天往前跑。没有券商账户、不下单、不动真钱。行情用 Yahoo Finance 的公开 chart 接口，纯标准库，单文件。
 
 ### 规则
 
-**买入**（未持仓时，按相对 SPY 的 20 日强度排序，强的先买）：
+第 T 日收盘出信号、T+1 日开盘成交，每边扣 0.15 % 滑点。
+
+买入候选（未持仓的），按相对 SPY 的 20 日强度排序，强的先买：
+
 - 收盘价 > 20 日均线 > 50 日均线
 - RSI(14) < 70
-- 20 日涨幅跑赢 SPY 同期涨幅
+- 20 日涨幅跑赢 SPY 同期
 
-**卖出**（持仓触发任意一条即卖）：
-- 止损 −7 % · 止盈 +18 %
+卖出（持仓触发任意一条）：
+
+- 止损 −7 % 或止盈 +18 %
 - 收盘跌破 20 日均线
 - 持有满 20 个交易日
 
-**组合**：虚拟本金 $1,000，最多 4 只，单只约 $330（单笔另有不超过净值 34 % 的上限）。内置回测模式：用同一套规则回放最近约 253 个交易日，输出相对 SPY 的收益、最大回撤和胜率。
+组合：虚拟本金 $1,000，最多 4 只，单只约 $330，单笔不超过净值的 34 %。
 
-每日运行时输出净值、持仓、成交和下一交易日计划；报告会打印、记入 `ledger.jsonl`，配置好后还会推送到 Telegram。只有「有动作、或周五、或首次运行」时才推送。
+### 关于那个回测
 
-### 部署三步
+`python3 paper.py backtest` 用同一套规则回放最近约 253 个交易日。在我的股票池上它打出 +68 %、同期 SPY +14 %、最大回撤 −20 %、86 笔平仓胜率 44 %。
 
-1. **填配置（可选）**：`cp config.example.json config.json` 改股票池和参数。不建也行，内置默认值与示例一致。想收 Telegram 报告：把 bot token 单独存一个文件，在 `config.json` 里填 `telegram.bot_token_file` 和 `telegram.chat_id`；留空就只打印不推送。
-2. **运行**：
+这个数字别当真。股票池是按今天的眼光事后挑的，样本期又正好赶上半导体牛年，动量策略在这种数据上不好看才怪。这正是这个机器人存在的意义：回测只是假设，往前跑的纸面记录才是检验。我给它定了 4 周的验证期，结论出来之前不谈真钱。
 
-   ```bash
-   python3 paper.py run        # 每日一步（cron 调的就是这个）
-   python3 paper.py backtest   # 用约 1 年历史回放规则
-   python3 paper.py status     # 查看当前状态
-   ```
+### 跑法
 
-   在交易日美股收盘后定时跑，例如 cron：
+```bash
+python3 paper.py run        # 每日一步（cron 调这个）
+python3 paper.py backtest   # 约 1 年历史回放
+python3 paper.py status     # 看当前状态
+```
 
-   ```cron
-   0 7 * * 2-6  cd /opt/stock-paper-bot && /usr/bin/python3 paper.py run >> run.log 2>&1
-   ```
+我这边是 cron 在美股收盘后跑（我的时区是周二到周六早上 7 点）：
 
-   （07:00 按 UTC+8 约为美股收盘后，周二到周六。）如果 Yahoo 还没出新 K 线，运行器会重试等待；没有新交易日就安静跳过。
+```cron
+0 7 * * 2-6  cd /opt/stock-paper-bot && /usr/bin/python3 paper.py run >> run.log 2>&1
+```
 
-状态保存在同目录的 `state.json`，每笔成交记入 `ledger.jsonl`。
+Yahoo 还没出新 K 线时它会重试等一会儿，不会直接崩；非交易日安静跳过。日报输出净值、持仓、成交和明日计划，记入 `ledger.jsonl`；只有真有动作、或者周五、或者首次运行时才推 Telegram（config 里填 `telegram.bot_token_file` 和 `telegram.chat_id`，留空就只打印）。状态在同目录 `state.json`。
 
-### 配置项说明（config.json）
+配置 `cp config.example.json config.json`，不建就用内置默认值。键就那些：`tradable` 股票池（示例文件里是通用大盘股名单，换成你自己的）、`benchmark` 基准、`capital` 本金、`max_positions`/`slot_usd` 仓位形状、`slippage` 滑点、`stop_loss`/`take_profit` 硬退出、`max_hold_days` 最长持有、`telegram.*` 可选推送（token 单独放文件里）。
 
-| 键 | 说明 |
-| --- | --- |
-| `tradable` | 扫描的股票池。 |
-| `benchmark` | 相对强度与对照基准（默认 SPY）。 |
-| `capital` | 虚拟起始本金（美元）。 |
-| `max_positions` | 最多同时持仓数。 |
-| `slot_usd` | 每个仓位的目标名义金额。 |
-| `slippage` | 每边滑点（默认 0.15 %）。 |
-| `stop_loss` / `take_profit` | 硬退出阈值（默认 −7 % / +18 %）。 |
-| `max_hold_days` | 最长持有交易日数。 |
-| `telegram.bot_token_file` | 存放 Telegram bot token 的文件路径（token 不写进 config、更不写进代码）。留空 = 不推送。 |
-| `telegram.chat_id` | 日报推送目标 chat ID。留空 = 不推送。 |
+Yahoo 的 chart 接口是非官方端点，随时可能改版或限流。报告文案是中文字符串。它是验证工具，不是投资建议——引用任何数字之前先看上面回测那段。
 
-### 说明与免责
-
-- 这是**验证工具**，不是投资建议：纸面成绩——尤其是在人工挑选的股票池、顺风行情里跑出的回测——会系统性高估实盘表现。幸存者偏差和挑选偏差真实存在；任何好看的数字都只算一个待验证的假设，不算证据。
-- Yahoo chart 接口是非官方公开端点，可能随时变更或限流。
-- 报告文案为中文，都是普通字符串，可自行替换。
-
-### 定制开发
-
-股票池、规则、阈值都能自己改。如果需要变体（换策略、换数据源、换报表形式），需要定制版或代部署，可联系作者获取付费定制服务。
-
-### License
-
-MIT，见 [LICENSE](LICENSE)。
+MIT，见 LICENSE。
